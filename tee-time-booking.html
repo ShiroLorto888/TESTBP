@@ -1,0 +1,1510 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>Tee Time Booking</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Styling สำหรับปิดปรับปรุง (Maintenance) */
+    .closed-row { background-color: #fecaca; } /* สีแดงอ่อน */
+    .closed-row:hover { background-color: #fca5a5; }
+
+    /* Styling สำหรับปิดแข่ง (Tournament) */
+    .tournament-row { 
+        background-color: #dbeafe; /* สีฟ้าอ่อน */
+        position: relative;
+    }
+    .tournament-row:hover { background-color: #bfdbfe; }
+    
+    /* Watermark ถ้วยรางวัล */
+    .tournament-watermark {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        color: rgba(30, 64, 175, 0.4); /* สีน้ำเงินจางๆ */
+        font-weight: bold;
+        font-style: italic;
+        font-size: 0.9rem;
+    }
+
+    .booking-row { background-color: #f0fdf4; }
+    .table-container { width: 100%; overflow-x: auto; }
+    .nav-tab.hidden { display: none; }
+    
+    .staff-only-col { display: none; }
+    .staff-only-section { display: none; }
+
+    @media (max-width: 640px) {
+      th, td { font-size: 0.75rem !important; padding: 0.3rem !important; } 
+      th.hide-mobile, td.hide-mobile { display: none !important; }
+    }
+    
+    /* --- PRINT STYLES (แก้ไขระยะห่าง และรูปแบบให้ชิดขอบ) --- */
+    @media print {
+        @page {
+            margin: 0.5cm; /* ลดขอบกระดาษให้เหลือน้อยที่สุด */
+            size: A4;
+        }
+
+        /* ซ่อนทุกอย่าง ยกเว้น printContainer */
+        body > *:not(#printContainer) { display: none !important; }
+        
+        #printContainer { 
+            display: block !important; 
+            width: 100%;
+            font-family: sans-serif;
+            color: #000;
+            background: white;
+        }
+
+        /* หัววันที่ */
+        .print-date-header {
+            text-align: center;
+            border-bottom: 2px solid #000;
+            padding-bottom: 5px;
+            margin-bottom: 10px; 
+            margin-top: 0; /* ดันให้ติดขอบบนสุด */
+        }
+        
+        .print-date-header h1 {
+            font-size: 16pt;
+            margin: 0;
+            font-weight: bold;
+            line-height: 1.2;
+        }
+
+        .print-date-header p {
+            font-size: 10pt;
+            margin: 0;
+            color: #555;
+        }
+
+        /* กล่องแต่ละคอร์ส */
+        .print-course-section {
+            margin-bottom: 15px; 
+            display: block;
+            /* เอา break-inside: avoid ออก เพื่อให้ตารางยาวต่อเนื่องหน้าถัดไปได้ ไม่เปลืองกระดาษ */
+            page-break-inside: auto; 
+        }
+
+        /* หัวข้อคอร์ส */
+        .print-course-header {
+            font-size: 12pt;
+            font-weight: bold;
+            margin-top: 5px;
+            margin-bottom: 2px;
+            background-color: #eee;
+            padding: 2px 8px;
+            border-left: 5px solid #000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            -webkit-print-color-adjust: exact;
+        }
+
+        .print-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            table-layout: fixed; 
+        }
+
+        .print-table th, .print-table td { 
+            border: 1px solid #444; 
+            padding: 2px 4px; /* ลด Padding ให้บรรทัดชิดขึ้น */
+            font-size: 9pt; /* ลดขนาดตัวอักษรเล็กน้อย */
+            text-align: left;
+            vertical-align: middle;
+            line-height: 1.1;
+        }
+
+        .print-table th { 
+            background-color: #ddd !important; 
+            text-align: center; 
+            font-weight: bold; 
+            -webkit-print-color-adjust: exact;
+            height: 25px;
+        }
+        
+        /* ไฮไลท์แถวที่มีการจอง */
+        .row-booked { 
+            background-color: #f0fdf4 !important; 
+            -webkit-print-color-adjust: exact;
+        } 
+        
+        /* แถวว่าง */
+        .row-empty td { 
+            color: #eee; 
+            height: 18px; /* ลดความสูงแถวว่าง */
+        }
+
+        .page-break { page-break-after: always; }
+    }
+  </style>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+</head>
+<body class="bg-blue-50 min-h-screen">
+
+  <div id="loginModal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[100]">
+    <div class="bg-white rounded-lg p-6 w-full max-w-sm shadow-lg">
+      <h2 class="text-2xl font-bold mb-4 text-center">เข้าสู่ระบบ</h2>
+      <form id="loginForm" class="space-y-4">
+        <div>
+          <label for="loginName" class="block font-semibold">ชื่อ Staff:</label>
+          <input type="text" id="loginName" class="border rounded px-2 py-1 w-full" required>
+        </div>
+        <div>
+          <label for="loginPass" class="block font-semibold">รหัสผ่าน:</label>
+          <input type="password" id="loginPass" class="border rounded px-2 py-1 w-full" required>
+        </div>
+        <div id="loginError" class="text-red-600 text-sm hidden">ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง</div>
+        <div class="flex flex-col gap-2">
+          <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded w-full">เข้าสู่ระบบ</button>
+          <button type="button" id="guestBtn" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded w-full">เข้าชมแบบ Guest (ดูอย่างเดียว)</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="appContainer" class="mx-auto p-2 sm:p-4 hidden">
+    
+    <div class="flex flex-row justify-end mb-2 gap-2 staff-only-section">
+      <button id="printBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded shadow text-sm font-semibold flex-shrink-0" style="display: none;">Print ข้อมูล</button>
+      <button id="exportExcelBtn" class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded shadow text-sm font-semibold flex-shrink-0" style="display: none;">Export Excel</button>
+      <button id="logoutBtn" class="bg-gray-700 hover:bg-gray-800 text-white px-4 py-2 rounded shadow text-sm font-semibold flex-shrink-0" style="display: none;">Logout</button>
+    </div>
+    
+    <h1 class="text-3xl sm:text-4xl font-extrabold text-center text-blue-900 mb-4 tracking-tight">Tee Time Booking</h1>
+    
+    <div class="flex flex-col sm:flex-row gap-2 mb-4 justify-center flex-wrap">
+      <button id="mainPageBtn" class="navBtn bg-blue-700 text-white px-4 py-2 rounded shadow w-full sm:w-auto">หน้าหลัก</button>
+      <button id="summaryPageBtn" class="navBtn bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded shadow w-full sm:w-auto">สรุปการจอง</button>
+      <button id="closedCoursesPageBtn" class="navBtn bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded shadow w-full sm:w-auto">ดูคอร์สที่ปิด</button>
+      <button id="caddyLeavePageBtn" class="navBtn bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded shadow w-full sm:w-auto">Caddy ลา</button>
+    </div>
+
+    <div id="mainSection">
+      <div class="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-4 items-center justify-between mb-4 bg-white p-3 rounded shadow-sm">
+        <div class="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+          <label class="font-semibold">วันที่:</label>
+          <input type="date" id="datePicker" class="border rounded px-2 py-1 w-full sm:w-auto font-bold text-blue-800" />
+          <button id="closeCourseBtn" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded shadow w-full sm:w-auto" style="display: none;">ปิดคอร์ส</button>
+          <button id="viewClosedCoursesBtn" class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded shadow w-full sm:w-auto">ดูคอร์สที่ปิด</button>
+        </div>
+        <div class="w-full sm:w-auto">
+          <input type="text" id="searchInput" class="border rounded px-2 py-1 w-full" placeholder="ค้นหาชื่อคนจอง..." />
+        </div>
+        <div class="flex gap-2">
+            <button id="openBookingBtn" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow w-full sm:w-auto" style="display: none;">+ จองเวลา</button>
+            <button id="openGroupBookingBtn" class="bg-teal-700 hover:bg-teal-800 text-white px-4 py-2 rounded shadow w-full sm:w-auto" style="display: none;">+ จองก๊วน</button>
+        </div>
+      </div>
+      
+      <div id="courseTabContainer" class="flex flex-wrap gap-2 justify-center mb-4">
+          <button id="tab_AB" class="course-tab px-6 py-2 rounded-t-lg font-bold text-lg border-b-4 border-transparent hover:bg-blue-100 w-full sm:w-auto shadow-sm">คอร์ส AB</button>
+          <button id="tab_CD" class="course-tab px-6 py-2 rounded-t-lg font-bold text-lg border-b-4 border-transparent hover:bg-green-100 w-full sm:w-auto shadow-sm">คอร์ส CD</button>
+          <button id="tab_C"  class="course-tab px-6 py-2 rounded-t-lg font-bold text-lg border-b-4 border-transparent hover:bg-green-100 w-full sm:w-auto shadow-sm">คอร์ส C</button>
+          <button id="tab_D"  class="course-tab px-6 py-2 rounded-t-lg font-bold text-lg border-b-4 border-transparent hover:bg-green-100 w-full sm:w-auto shadow-sm">คอร์ส D</button>
+      </div>
+
+      <div id="courseTablesContainer" class="bg-white p-1 rounded shadow min-h-[500px]">
+        <div id="view_AB" class="table-view hidden">
+            <div class="text-center mb-2 pt-2">
+                <h2 class="text-2xl font-bold text-blue-800">ตารางคอร์ส AB</h2>
+                <div id="totalBookingCount_AB" class="text-red-600 text-sm font-semibold"></div>
+            </div>
+            <div class="table-container">
+                <table class="min-w-full bg-white">
+                    <thead>
+                        <tr class="bg-blue-200 text-gray-800"> 
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">เวลา</th> <th class="px-3 py-2 whitespace-nowrap min-w-[160px]">ชื่อลูกค้า</th> <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">จำนวน</th> 
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[100px] staff-only-col">เบอร์โทร</th>
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[80px] staff-only-col">ราคา</th>
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[100px]">เบอร์แคดดี้</th> <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">คอร์ส</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[60px]">Staff</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[100px]">วันที่จอง</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[120px]">หมายเหตุ</th> <th class="px-3 py-2 manage-col whitespace-nowrap min-w-[140px]">จัดการ</th> 
+                        </tr>
+                    </thead>
+                    <tbody id="bookingTableBody_AB"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="view_CD" class="table-view hidden">
+            <div class="text-center mb-2 pt-2">
+                <h2 class="text-2xl font-bold text-green-800">ตารางคอร์ส CD</h2>
+                <div id="totalBookingCount_CD" class="text-red-600 text-sm font-semibold"></div>
+            </div>
+            <div class="table-container">
+                <table class="min-w-full bg-white">
+                    <thead>
+                        <tr class="bg-green-200 text-gray-800"> 
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">เวลา</th> <th class="px-3 py-2 whitespace-nowrap min-w-[160px]">ชื่อลูกค้า</th> <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">จำนวน</th> 
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[100px] staff-only-col">เบอร์โทร</th>
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[80px] staff-only-col">ราคา</th>
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[100px]">เบอร์แคดดี้</th> <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">คอร์ส</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[60px]">Staff</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[100px]">วันที่จอง</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[120px]">หมายเหตุ</th> <th class="px-3 py-2 manage-col whitespace-nowrap min-w-[140px]">จัดการ</th> 
+                        </tr>
+                    </thead>
+                    <tbody id="bookingTableBody_CD"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="view_C" class="table-view hidden">
+            <div class="text-center mb-2 pt-2">
+                <h2 class="text-2xl font-bold text-green-800">ตารางคอร์ส C</h2>
+                <div id="totalBookingCount_C" class="text-red-600 text-sm font-semibold"></div>
+            </div>
+            <div class="table-container">
+                <table class="min-w-full bg-white">
+                    <thead>
+                        <tr class="bg-green-200 text-gray-800"> 
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">เวลา</th> <th class="px-3 py-2 whitespace-nowrap min-w-[160px]">ชื่อลูกค้า</th> <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">จำนวน</th>
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[100px] staff-only-col">เบอร์โทร</th>
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[80px] staff-only-col">ราคา</th>
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[100px]">เบอร์แคดดี้</th> <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">คอร์ส</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[60px]">Staff</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[100px]">วันที่จอง</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[120px]">หมายเหตุ</th> <th class="px-3 py-2 manage-col whitespace-nowrap min-w-[140px]">จัดการ</th> 
+                        </tr>
+                    </thead>
+                    <tbody id="bookingTableBody_C"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="view_D" class="table-view hidden">
+            <div class="text-center mb-2 pt-2">
+                <h2 class="text-2xl font-bold text-green-800">ตารางคอร์ส D</h2>
+                <div id="totalBookingCount_D" class="text-red-600 text-sm font-semibold"></div>
+            </div>
+            <div class="table-container">
+                <table class="min-w-full bg-white">
+                    <thead>
+                        <tr class="bg-green-200 text-gray-800"> 
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">เวลา</th> <th class="px-3 py-2 whitespace-nowrap min-w-[160px]">ชื่อลูกค้า</th> <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">จำนวน</th>
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[100px] staff-only-col">เบอร์โทร</th>
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[80px] staff-only-col">ราคา</th>
+                            <th class="px-3 py-2 whitespace-nowrap min-w-[100px]">เบอร์แคดดี้</th> <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">คอร์ส</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[60px]">Staff</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[100px]">วันที่จอง</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[120px]">หมายเหตุ</th> <th class="px-3 py-2 manage-col whitespace-nowrap min-w-[140px]">จัดการ</th> 
+                        </tr>
+                    </thead>
+                    <tbody id="bookingTableBody_D"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="hidden">
+            <table><tbody id="bookingTableBody_A"></tbody></table>
+            <div id="totalBookingCount_A"></div>
+        </div>
+        <div class="hidden">
+            <table><tbody id="bookingTableBody_B"></tbody></table>
+            <div id="totalBookingCount_B"></div>
+        </div>
+
+      </div>
+
+      <div class="mt-8 flex justify-center staff-only-section">
+        <button id="deleteAllBtn" class="bg-red-800 hover:bg-red-900 text-white font-bold py-3 px-6 rounded shadow-lg border-2 border-red-950 flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+            ลบการจองทั้งหมดของวันนี้
+        </button>
+      </div>
+      <div class="text-center text-gray-500 text-sm mt-2 staff-only-section">* โปรดระมัดระวัง ปุ่มนี้จะลบข้อมูลลูกค้าทุกคนในวันที่เลือก</div>
+
+    </div>
+
+    <div id="summarySection" class="hidden">
+      <h1 class="text-xl sm:text-2xl font-bold text-center mb-4">สรุปการจอง</h1>
+      <div id="summaryTotalBookingCount" class="text-red-600 text-sm mb-4 text-center"></div>
+      <div class="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-4 items-center justify-between mb-4">
+        <div class="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+          <input type="text" id="summarySearchInput" class="border rounded px-2 py-1 w-full sm:w-auto" placeholder="ค้นหาชื่อคนจอง..." />
+          <input type="text" id="summaryCaddySearchInput" class="border rounded px-2 py-1 w-full sm:w-auto" placeholder="ค้นหาเบอร์แคดดี้..." />
+        </div>
+        <div class="flex flex-col sm:flex-row gap-2 items-center w-full md:w-auto">
+          <input type="date" id="summaryDatePicker" class="border rounded px-2 py-1 w-full sm:w-auto" />
+          <button id="summaryClearDateBtn" class="bg-gray-400 hover:bg-gray-500 text-white px-3 py-1 rounded text-sm w-full sm:w-auto">ล้างวันที่</button>
+          <select id="summarySortSelect" class="border rounded px-2 py-1 w-full sm:w-auto">
+            <option value="az">ชื่อ A-Z</option>
+            <option value="za">ชื่อ Z-A</option>
+            <option value="thaz">ชื่อ ก-ฮ</option>
+            <option value="thza">ชื่อ ฮ-ก</option>
+            <option value="dateDesc">วันที่ใหม่-เก่า</option>
+            <option value="dateAsc">วันที่เก่า-ใหม่</option>
+          </select>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full bg-white rounded shadow">
+          <thead>
+            <tr class="bg-purple-200 text-gray-800">
+              <th class="px-3 py-2 whitespace-nowrap min-w-[100px]">วันที่</th> <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">เวลา</th> <th class="px-3 py-2 whitespace-nowrap min-w-[160px]">ชื่อลูกค้า</th> <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">จำนวน</th>
+              <th class="px-3 py-2 whitespace-nowrap min-w-[100px] staff-only-col">เบอร์โทร</th>
+              <th class="px-3 py-2 whitespace-nowrap min-w-[80px] staff-only-col">ราคา</th>
+              <th class="px-3 py-2 whitespace-nowrap min-w-[100px]">เบอร์แคดดี้</th> <th class="px-3 py-2 whitespace-nowrap min-w-[60px]">คอร์ส</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[60px]">Staff</th> <th class="px-3 py-2 hide-mobile whitespace-nowrap min-w-[120px]">หมายเหตุ</th> <th class="px-3 py-2 manage-col whitespace-nowrap min-w-[100px]">จัดการ</th> 
+            </tr>
+          </thead>
+          <tbody id="summaryTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="closedCoursesSection" class="hidden">
+      <h1 class="text-xl sm:text-2xl font-bold text-center mb-4">จัดการคอร์สที่ปิด</h1>
+      <p class="text-center text-gray-600 mb-4">ในหน้านี้ คุณสามารถ "ยกเลิก" การปิดคอร์สที่ได้บันทึกไว้</p>
+      <div class="overflow-x-auto">
+        <table class="min-w-full bg-white rounded shadow">
+          <thead>
+            <tr class="bg-orange-200 text-gray-800">
+              <th class="px-3 py-2 whitespace-nowrap min-w-[100px]">วันที่</th> <th class="px-3 py-2 whitespace-nowrap min-w-[100px]">เวลาเริ่ม</th> <th class="px-3 py-2 whitespace-nowrap min-w-[100px]">เวลาสิ้นสุด</th> <th class="px-3 py-2 whitespace-nowrap min-w-[100px]">คอร์ส</th>
+              <th class="px-3 py-2 whitespace-nowrap min-w-[100px]">ประเภท</th>
+              <th class="px-3 py-2 whitespace-nowrap min-w-[150px]">หมายเหตุ</th> 
+              <th class="px-3 py-2 manage-col whitespace-nowrap min-w-[100px]">จัดการ</th> 
+            </tr>
+          </thead>
+          <tbody id="closedCoursesTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="caddyLeaveSection" class="hidden">
+        <h1 class="text-xl sm:text-2xl font-bold text-center mb-4 text-red-600">จัดการ Caddy ลา</h1>
+        <div class="flex justify-between items-center mb-4">
+            <div class="text-gray-600 text-sm">* แคดดี้ที่ลาจะไม่สามารถถูกจองในวันที่กำหนดได้</div>
+            <button id="openAddCaddyLeaveBtn" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded shadow font-bold">+ เพิ่ม Caddy ลา</button>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full bg-white rounded shadow">
+                <thead>
+                    <tr class="bg-red-100 text-gray-800">
+                        <th class="px-3 py-2 text-left">วันที่ลา</th>
+                        <th class="px-3 py-2 text-left">เบอร์แคดดี้</th>
+                        <th class="px-3 py-2 text-left">หมายเหตุ</th>
+                        <th class="px-3 py-2 text-center manage-col">จัดการ</th>
+                    </tr>
+                </thead>
+                <tbody id="caddyLeaveTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+  </div> 
+  
+  <div id="bookingModal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg p-6 w-full max-w-lg shadow-lg">
+      <h2 class="text-xl font-bold mb-4" id="modalTitle">จอง Tee Time</h2>
+      <form id="bookingForm" class="space-y-3">
+        <div><label>วันที่:</label><input type="date" id="modalDateInput" class="border rounded px-2 py-1 w-full" required></div>
+        <div><label>เวลา:</label><select id="timeInput" class="border rounded px-2 py-1 w-full"></select></div>
+        <div><label>ชื่อลูกค้า:</label><input type="text" id="customerInput" class="border rounded px-2 py-1 w-full" required></div>
+        <div><label>เบอร์โทร:</label><input type="text" id="phoneInput" class="border rounded px-2 py-1 w-full" placeholder="เบอร์ติดต่อ"></div>
+        <div><label>ราคา:</label><input type="number" id="priceInput" class="border rounded px-2 py-1 w-full" placeholder="ระบุราคา"></div>
+        <div><label>จำนวน:</label><select id="countInput" class="border rounded px-2 py-1 w-full" required></select></div>
+        <div><label>เบอร์แคดดี้:</label><input type="text" id="caddyInput" class="border rounded px-2 py-1 w-full" placeholder="เช่น 001, 002"></div>
+        <div><label>คอร์ส:</label><div class="flex gap-2" id="courseCheckboxes"><label><input type="checkbox" name="course" value="A" class="mr-1">A</label><label><input type="checkbox" name="course" value="B" class="mr-1">B</label><label><input type="checkbox" name="course" value="C" class="mr-1">C</label><label><input type="checkbox" name="course" value="D" class="mr-1">D</label></div></div>
+        <div><label>Staff:</label><input type="text" id="staffInput" class="border rounded px-2 py-1 w-full bg-gray-100" disabled></div>
+        <div><label>หมายเหตุ:</label><input type="text" id="noteInput" class="border rounded px-2 py-1 w-full"></div>
+        <div class="flex justify-end gap-2 mt-4"><button type="button" id="cancelBtn" class="bg-gray-400 text-white px-4 py-2 rounded">ยกเลิก</button><button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded manage-col">บันทึก</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="groupBookingModal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg p-6 w-full max-w-lg shadow-lg">
+      <h2 class="text-xl font-bold mb-4" id="groupModalTitle">จองก๊วน (Group Booking)</h2>
+      <div class="text-sm text-gray-500 mb-2">* ระบบจะตัดก๊วนละ 4 ท่านโดยอัตโนมัติ</div>
+      <form id="groupBookingForm" class="space-y-3">
+        <div><label>วันที่:</label><input type="date" id="groupModalDateInput" class="border rounded px-2 py-1 w-full" required></div>
+        <div><label>เวลาเริ่ม:</label><select id="groupTimeInput" class="border rounded px-2 py-1 w-full"></select></div>
+        <div><label>ชื่อ (ก๊วน):</label><input type="text" id="groupCustomerInput" class="border rounded px-2 py-1 w-full" required></div>
+        <div><label>เบอร์โทร:</label><input type="text" id="groupPhoneInput" class="border rounded px-2 py-1 w-full" placeholder="เบอร์ติดต่อ"></div>
+        <div><label>ราคา (ต่อคน/รวม):</label><input type="number" id="groupPriceInput" class="border rounded px-2 py-1 w-full" placeholder="ระบุราคา"></div>
+        <div><label>จำนวน (คน):</label><input type="number" id="groupCountInput" class="border rounded px-2 py-1 w-full" required min="1" placeholder="เช่น 20"></div>
+        <div><label>เบอร์แคดดี้ (ถ้ามี):</label><input type="text" id="groupCaddyInput" class="border rounded px-2 py-1 w-full" placeholder="พิมเองได้เลย"></div>
+        <div><label>คอร์ส:</label><div class="flex gap-2" id="groupCourseCheckboxes"><label><input type="checkbox" name="course" value="A" class="mr-1">A</label><label><input type="checkbox" name="course" value="B" class="mr-1">B</label><label><input type="checkbox" name="course" value="C" class="mr-1">C</label><label><input type="checkbox" name="course" value="D" class="mr-1">D</label></div></div>
+        <div><label>Staff:</label><input type="text" id="groupStaffInput" class="border rounded px-2 py-1 w-full bg-gray-100" disabled></div>
+        <div><label>หมายเหตุ:</label><input type="text" id="groupNoteInput" class="border rounded px-2 py-1 w-full"></div>
+        <div class="flex justify-end gap-2 mt-4"><button type="button" id="groupCancelBtn" class="bg-gray-400 text-white px-4 py-2 rounded">ยกเลิก</button><button type="submit" class="bg-teal-600 text-white px-4 py-2 rounded manage-col">บันทึกจองก๊วน</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="caddyLeaveModal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[60] hidden">
+    <div class="bg-white rounded-lg p-6 w-full max-w-sm shadow-lg">
+        <h2 class="text-xl font-bold mb-4 text-red-700" id="caddyLeaveModalTitle">บันทึก Caddy ลา</h2>
+        <form id="caddyLeaveForm" class="space-y-4">
+            <div>
+                <label class="block font-semibold">เลขที่แคดดี้:</label>
+                <input type="text" id="leaveCaddyInput" class="border rounded px-2 py-1 w-full" required inputmode="numeric" pattern="\d{3}" maxlength="3" placeholder="เช่น 001">
+            </div>
+            <div id="leaveStartDateDiv">
+                <label class="block font-semibold">วันที่ลา (เริ่ม):</label>
+                <input type="date" id="leaveStartDateInput" class="border rounded px-2 py-1 w-full" required>
+            </div>
+            <div id="leaveEndDateDiv">
+                <label class="block font-semibold">วันที่ลา (สิ้นสุด):</label>
+                <input type="date" id="leaveEndDateInput" class="border rounded px-2 py-1 w-full" required>
+            </div>
+            <div>
+                <label class="block font-semibold">หมายเหตุ:</label>
+                <input type="text" id="leaveNoteInput" class="border rounded px-2 py-1 w-full" placeholder="เช่น ลากิจ">
+            </div>
+            <div class="flex justify-end gap-2 pt-2">
+                <button type="button" id="leaveCancelBtn" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded">ยกเลิก</button>
+                <button type="submit" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">บันทึก</button>
+            </div>
+        </form>
+    </div>
+  </div>
+  
+  <div id="printModal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[60] hidden">
+    <div class="bg-white rounded-lg p-6 w-full max-w-sm shadow-lg">
+        <h2 class="text-xl font-bold mb-4 text-indigo-700">เลือกช่วงวันที่สำหรับพิมพ์</h2>
+        <form id="printForm" class="space-y-4">
+            <div>
+                <label class="block font-semibold">วันที่เริ่มต้น:</label>
+                <input type="date" id="printStartDate" class="border rounded px-2 py-1 w-full" required>
+            </div>
+            <div>
+                <label class="block font-semibold">วันที่สิ้นสุด:</label>
+                <input type="date" id="printEndDate" class="border rounded px-2 py-1 w-full" required>
+            </div>
+            <div class="flex justify-end gap-2 pt-2">
+                <button type="button" id="printCancelBtn" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded">ยกเลิก</button>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded">พิมพ์รายงาน</button>
+            </div>
+        </form>
+    </div>
+  </div>
+
+  <div id="printContainer" class="hidden">
+    </div>
+
+  <button id="logBtn" style="position:fixed;bottom:10px;right:10px; display: none;" class="bg-gray-700 hover:bg-gray-800 text-white text-xs px-2 py-1 rounded shadow">Log</button>
+  
+  <script>
+    // --- Firebase Config (unchanged) ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyCsEdIGoxQwxpaP5VLzKxnNSViIg7HYHeo",
+      authDomain: "teetime-49e96.firebaseapp.com",
+      projectId: "teetime-49e96",
+      storageBucket: "teetime-49e96.appspot.com",
+      messagingSenderId: "325379401675",
+      appId: "1:325379401675:web:076af7ff6d84505963784e",
+      measurementId: "G-R2NJ1325WV"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    
+    // --- UI Elements ---
+    const datePicker = document.getElementById('datePicker');
+    const deleteAllBtn = document.getElementById('deleteAllBtn');
+    
+    const bookingTableBody_AB = document.getElementById('bookingTableBody_AB');
+    const bookingTableBody_CD = document.getElementById('bookingTableBody_CD');
+    const bookingTableBody_C = document.getElementById('bookingTableBody_C');
+    const bookingTableBody_D = document.getElementById('bookingTableBody_D');
+    const bookingTableBody_A = document.getElementById('bookingTableBody_A');
+    const bookingTableBody_B = document.getElementById('bookingTableBody_B');
+
+    const totalBookingCount_AB = document.getElementById('totalBookingCount_AB');
+    const totalBookingCount_CD = document.getElementById('totalBookingCount_CD');
+    const totalBookingCount_C = document.getElementById('totalBookingCount_C');
+    const totalBookingCount_D = document.getElementById('totalBookingCount_D');
+    const totalBookingCount_A = document.getElementById('totalBookingCount_A');
+    const totalBookingCount_B = document.getElementById('totalBookingCount_B');
+
+    const tab_AB = document.getElementById('tab_AB');
+    const tab_CD = document.getElementById('tab_CD');
+    const tab_C = document.getElementById('tab_C');
+    const tab_D = document.getElementById('tab_D');
+    const view_AB = document.getElementById('view_AB');
+    const view_CD = document.getElementById('view_CD');
+    const view_C = document.getElementById('view_C');
+    const view_D = document.getElementById('view_D');
+
+    const openBookingBtn = document.getElementById('openBookingBtn');
+    const bookingModal = document.getElementById('bookingModal');
+    const bookingForm = document.getElementById('bookingForm');
+    const modalTitle = document.getElementById('modalTitle');
+    const timeInput = document.getElementById('timeInput');
+    const customerInput = document.getElementById('customerInput');
+    const phoneInput = document.getElementById('phoneInput'); 
+    const priceInput = document.getElementById('priceInput'); 
+    const countInput = document.getElementById('countInput');
+    const caddyInput = document.getElementById('caddyInput');
+    const staffInput = document.getElementById('staffInput');
+    const noteInput = document.getElementById('noteInput');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const modalDateInput = document.getElementById('modalDateInput');
+    const courseCheckboxesDiv = document.getElementById('courseCheckboxes');
+
+    const openGroupBookingBtn = document.getElementById('openGroupBookingBtn');
+    const groupBookingModal = document.getElementById('groupBookingModal');
+    const groupBookingForm = document.getElementById('groupBookingForm');
+    const groupModalDateInput = document.getElementById('groupModalDateInput');
+    const groupTimeInput = document.getElementById('groupTimeInput');
+    const groupCustomerInput = document.getElementById('groupCustomerInput');
+    const groupPhoneInput = document.getElementById('groupPhoneInput'); 
+    const groupPriceInput = document.getElementById('groupPriceInput'); 
+    const groupCountInput = document.getElementById('groupCountInput');
+    const groupCaddyInput = document.getElementById('groupCaddyInput');
+    const groupCourseCheckboxes = document.getElementById('groupCourseCheckboxes');
+    const groupStaffInput = document.getElementById('groupStaffInput');
+    const groupNoteInput = document.getElementById('groupNoteInput');
+    const groupCancelBtn = document.getElementById('groupCancelBtn');
+
+    const mainSection = document.getElementById('mainSection');
+    const summarySection = document.getElementById('summarySection');
+    const closedCoursesSection = document.getElementById('closedCoursesSection');
+    const caddyLeaveSection = document.getElementById('caddyLeaveSection');
+
+    const mainPageBtn = document.getElementById('mainPageBtn');
+    const summaryPageBtn = document.getElementById('summaryPageBtn');
+    const closedCoursesPageBtn = document.getElementById('closedCoursesPageBtn');
+    const caddyLeavePageBtn = document.getElementById('caddyLeavePageBtn');
+
+    const searchInput = document.getElementById('searchInput');
+    const summarySearchInput = document.getElementById('summarySearchInput');
+    const summarySortSelect = document.getElementById('summarySortSelect');
+    const summaryTableBody = document.getElementById('summaryTableBody');
+    const summaryTotalBookingCount = document.getElementById('summaryTotalBookingCount');
+    const summaryDatePicker = document.getElementById('summaryDatePicker');
+    const summaryClearDateBtn = document.getElementById('summaryClearDateBtn');
+    const summaryCaddySearchInput = document.getElementById('summaryCaddySearchInput');
+    
+    const closeCourseBtn = document.getElementById('closeCourseBtn');
+    const viewClosedCoursesBtn = document.getElementById('viewClosedCoursesBtn');
+    const closedCoursesTableBody = document.getElementById('closedCoursesTableBody');
+
+    const openAddCaddyLeaveBtn = document.getElementById('openAddCaddyLeaveBtn');
+    const caddyLeaveModal = document.getElementById('caddyLeaveModal');
+    const caddyLeaveForm = document.getElementById('caddyLeaveForm');
+    const leaveCaddyInput = document.getElementById('leaveCaddyInput');
+    const leaveStartDateInput = document.getElementById('leaveStartDateInput');
+    const leaveEndDateInput = document.getElementById('leaveEndDateInput');
+    const leaveStartDateDiv = document.getElementById('leaveStartDateDiv');
+    const leaveEndDateDiv = document.getElementById('leaveEndDateDiv');
+    const leaveNoteInput = document.getElementById('leaveNoteInput');
+    const leaveCancelBtn = document.getElementById('leaveCancelBtn');
+    const caddyLeaveTableBody = document.getElementById('caddyLeaveTableBody');
+    const caddyLeaveModalTitle = document.getElementById('caddyLeaveModalTitle');
+
+    const exportExcelBtn = document.getElementById('exportExcelBtn');
+    const logBtn = document.getElementById('logBtn');
+
+    // NEW PRINT ELEMENTS
+    const printBtn = document.getElementById('printBtn');
+    const printModal = document.getElementById('printModal');
+    const printForm = document.getElementById('printForm');
+    const printStartDate = document.getElementById('printStartDate');
+    const printEndDate = document.getElementById('printEndDate');
+    const printCancelBtn = document.getElementById('printCancelBtn');
+    const printContainer = document.getElementById('printContainer');
+
+    // --- Logging ---
+    async function logActivity(action, details = {}) {
+      try {
+        if (currentStaff) details.staff = currentStaff;
+        await db.collection('activity_logs').add({ timestamp: new Date().toISOString(), action: action, details: details });
+      } catch (error) { console.error("Error logging", error); }
+    }
+
+    for (let i = 1; i <= 5; i++) {
+      const opt = document.createElement('option'); opt.value = i; opt.textContent = i; countInput.appendChild(opt);
+    }
+    
+    // MODIFIED: caddyInput allows numbers and commas
+    caddyInput.addEventListener('input', (e) => { e.target.value = e.target.value.replace(/[^0-9,]/g, ''); });
+    // leaveCaddyInput still numbers only (single caddy leave)
+    leaveCaddyInput.addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, ''); });
+
+    function generateTimeSlots() {
+      return ["6:00","6:08","6:16","6:24","6:32","6:40","6:48","6:56","7:04","7:12","7:20","7:28","7:36","7:44","7:52","8:00","8:08","8:16","8:24","8:32","8:40","8:48","8:56","9:04","9:12","9:20","9:28","9:36","9:44","9:52","10:00","10:08","10:16","10:24","10:32","10:40","10:48","10:56","11:04","11:12","11:20","11:28","11:36","11:44","11:52","12:00","12:08","12:16","12:24","12:32","12:40","12:48","12:56","13:04","13:12","13:20","13:28","13:36","14:00","15:45"];
+    }
+    function fillTimeOptions(selectElement) {
+      if (!selectElement) return;
+      selectElement.innerHTML = '';
+      generateTimeSlots().forEach(t => { const opt = document.createElement('option'); opt.value = t; opt.textContent = t; selectElement.appendChild(opt); });
+    }
+    fillTimeOptions(timeInput); fillTimeOptions(groupTimeInput);
+
+    let editingId = null;
+    let allBookingsForSearch = {}; 
+    let closedCourseSlots = []; 
+    let allCaddyLeaves = []; 
+
+    // --- Utility Functions ---
+    function todayStr() { const d = new Date(); return d.toISOString().slice(0,10); }
+    datePicker.value = todayStr();
+    printStartDate.value = todayStr();
+    printEndDate.value = todayStr();
+
+    // --- Print Modal Logic ---
+    printBtn.onclick = () => {
+        printStartDate.value = datePicker.value;
+        printEndDate.value = datePicker.value;
+        printModal.classList.remove('hidden');
+    };
+    printCancelBtn.onclick = () => { printModal.classList.add('hidden'); };
+    
+    printForm.onsubmit = (e) => {
+        e.preventDefault();
+        const startDate = printStartDate.value;
+        const endDate = printEndDate.value;
+        if (startDate > endDate) {
+            alert("วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด");
+            return;
+        }
+        printModal.classList.add('hidden');
+        handlePrint(startDate, endDate);
+    };
+
+    // --- NEW: Handle Print Logic (Dynamic Layout by Weekday) ---
+    async function handlePrint(startDate, endDate) {
+        try {
+            // 1. Fetch Data
+            const qs = await db.collection('tee_bookings')
+                .where('date', '>=', startDate)
+                .where('date', '<=', endDate)
+                .get();
+            
+            const bookings = [];
+            qs.forEach(doc => { bookings.push({ id: doc.id, ...doc.data() }); });
+
+            // 2. Prepare Time Slots
+            const allTimeSlots = generateTimeSlots(); 
+            
+            // Prepare Dates
+            let currentDate = new Date(startDate);
+            const end = new Date(endDate);
+            const datesToPrint = [];
+            while (currentDate <= end) {
+                datesToPrint.push(currentDate.toISOString().slice(0, 10));
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+
+            let htmlContent = ``;
+
+            // Loop Dates
+            datesToPrint.forEach(dateStr => {
+                const dateObj = new Date(dateStr);
+                const dayOfWeek = dateObj.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+                const dateTh = dateObj.toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+                // กำหนด Layout ตามวัน
+                // จันทร์(1) - พฤหัส(4) -> AB, CD
+                // ศุกร์(5), เสาร์(6), อาทิตย์(0) -> AB, C, D
+                let coursesToShow = [];
+                if (dayOfWeek >= 1 && dayOfWeek <= 4) {
+                    coursesToShow = ['AB', 'CD'];
+                } else {
+                    coursesToShow = ['AB', 'C', 'D'];
+                }
+
+                htmlContent += `<div class="print-date-header">
+                                    <h1>ตาราง Tee Time: ${dateTh}</h1>
+                                    <p>พิมพ์โดย: ${currentStaff || '-'} | ข้อมูล ณ เวลา: ${new Date().toLocaleTimeString('th-TH')}</p>
+                                </div>`;
+
+                // Loop Courses based on day layout
+                coursesToShow.forEach(courseName => {
+                    
+                    htmlContent += `<div class="print-course-section">`;
+                    htmlContent += `<div class="print-course-header">
+                                        <span>คอร์ส ${courseName}</span>
+                                        <span style="font-size: 10pt; font-weight: normal;">วันที่ ${dateStr}</span>
+                                    </div>`;
+                    
+                    htmlContent += `<table class="print-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">เวลา</th>
+                                <th style="width: 180px;">ชื่อลูกค้า</th>
+                                <th style="width: 40px;">คน</th>
+                                <th style="width: 50px;">แคดดี้</th>
+                                <th style="width: 50px;">คอร์ส</th>
+                                <th>หมายเหตุ</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+
+                    // Loop Time
+                    allTimeSlots.forEach(time => {
+                        // Filter logic ตาม Course layout
+                        let matchingBookings = [];
+
+                        if (courseName === 'AB') {
+                            // แสดงรายการที่มี A หรือ B (ครอบคลุมทั้ง AB และ A เดี่ยว B เดี่ยว)
+                            matchingBookings = bookings.filter(b => 
+                                b.date === dateStr && 
+                                b.time === time && 
+                                b.course && b.course.some(c => ['A', 'B'].includes(c))
+                            );
+                        } else if (courseName === 'CD') {
+                            // แสดงรายการที่มี C หรือ D
+                            matchingBookings = bookings.filter(b => 
+                                b.date === dateStr && 
+                                b.time === time && 
+                                b.course && b.course.some(c => ['C', 'D'].includes(c))
+                            );
+                        } else if (courseName === 'C') {
+                            matchingBookings = bookings.filter(b => 
+                                b.date === dateStr && 
+                                b.time === time && 
+                                b.course && b.course.includes('C')
+                            );
+                        } else if (courseName === 'D') {
+                            matchingBookings = bookings.filter(b => 
+                                b.date === dateStr && 
+                                b.time === time && 
+                                b.course && b.course.includes('D')
+                            );
+                        }
+
+                        if (matchingBookings.length > 0) {
+                            matchingBookings.forEach(b => {
+                                htmlContent += `<tr class="row-booked">
+                                    <td style="font-weight:bold; text-align:center;">${time}</td>
+                                    <td>${b.customer || ''}</td>
+                                    <td style="text-align: center;">${b.count || ''}</td>
+                                    <td style="text-align: center;">${b.caddy || ''}</td>
+                                    <td style="text-align: center;">${b.course.join('+')}</td>
+                                    <td>${b.note || ''}</td>
+                                </tr>`;
+                            });
+                        } else {
+                            htmlContent += `<tr class="row-empty">
+                                <td style="text-align:center;">${time}</td>
+                                <td></td>
+                                <td></td>
+                                <td></td>
+                                <td></td>
+                                <td></td>
+                            </tr>`;
+                        }
+                    });
+
+                    htmlContent += `</tbody></table>`;
+                    htmlContent += `</div>`; // End Course Section
+                });
+                
+                // จบ 1 วัน ให้ขึ้นหน้าใหม่
+                htmlContent += `<div class="page-break"></div>`;
+            });
+
+            printContainer.innerHTML = htmlContent;
+
+            // Trigger Print
+            window.print();
+            
+            // Cleanup
+            setTimeout(() => {
+                printContainer.innerHTML = '';
+            }, 500);
+
+            logActivity('สั่งพิมพ์รายงาน', { startDate, endDate });
+        } catch (error) {
+            console.error("Error during print process:", error);
+            alert("เกิดข้อผิดพลาดในการดึงข้อมูลเพื่อพิมพ์: " + error.message);
+        }
+    }
+    
+    // --- Booking Modal Logic (unchanged) ---
+    openBookingBtn.onclick = () => {
+      modalTitle.textContent = "จอง Tee Time"; bookingForm.reset(); fillTimeOptions(timeInput); editingId = null; modalDateInput.value = datePicker.value; staffInput.value = currentStaff; staffInput.disabled = true; bookingModal.classList.remove('hidden'); updateCourseCheckboxesForTime(timeInput.value, courseCheckboxesDiv, null); 
+    };
+    cancelBtn.onclick = () => { bookingModal.classList.add('hidden'); staffInput.disabled = false; staffInput.value = ''; };
+    timeInput.onchange = () => { updateCourseCheckboxesForTime(timeInput.value, courseCheckboxesDiv, editingId); };
+
+    openGroupBookingBtn.onclick = () => {
+      groupBookingForm.reset(); editingId = null; groupModalDateInput.value = datePicker.value; groupStaffInput.value = currentStaff; groupStaffInput.disabled = true; groupBookingModal.classList.remove('hidden'); updateCourseCheckboxesForTime(groupTimeInput.value, groupCourseCheckboxes, null);
+    };
+    groupCancelBtn.onclick = () => { groupBookingModal.classList.add('hidden'); groupStaffInput.disabled = false; groupStaffInput.value = ''; };
+    groupTimeInput.onchange = () => { updateCourseCheckboxesForTime(groupTimeInput.value, groupCourseCheckboxes, null); };
+
+    // --- Tab Logic (unchanged) ---
+    let lastActiveTab = 'AB';
+    function updateLayoutByDate(dateString) {
+        if (!dateString) return;
+        const d = new Date(dateString);
+        const day = d.getDay(); 
+        tab_AB.classList.add('hidden'); tab_CD.classList.add('hidden'); tab_C.classList.add('hidden'); tab_D.classList.add('hidden');
+        if (day >= 1 && day <= 4) {
+            tab_AB.classList.remove('hidden'); tab_CD.classList.remove('hidden');
+            if (!lastActiveTab || lastActiveTab === 'C' || lastActiveTab === 'D') switchCourseView('AB'); else switchCourseView(lastActiveTab);
+        } else {
+            tab_AB.classList.remove('hidden'); tab_C.classList.remove('hidden'); tab_D.classList.remove('hidden');
+            if (lastActiveTab === 'CD') switchCourseView('AB'); else switchCourseView(lastActiveTab || 'AB');
+        }
+    }
+    function switchCourseView(courseCode) {
+        lastActiveTab = courseCode;
+        view_AB.classList.add('hidden'); view_CD.classList.add('hidden'); view_C.classList.add('hidden'); view_D.classList.add('hidden');
+        [tab_AB, tab_CD, tab_C, tab_D].forEach(btn => { btn.classList.remove('bg-blue-600', 'bg-green-600', 'text-white', 'border-blue-800', 'border-green-800'); btn.classList.add('bg-white', 'text-gray-600'); });
+        if (courseCode === 'AB') { view_AB.classList.remove('hidden'); tab_AB.classList.remove('bg-white', 'text-gray-600'); tab_AB.classList.add('bg-blue-600', 'text-white', 'border-blue-800'); } 
+        else if (courseCode === 'CD') { view_CD.classList.remove('hidden'); tab_CD.classList.remove('bg-white', 'text-gray-600'); tab_CD.classList.add('bg-green-600', 'text-white', 'border-green-800'); }
+        else if (courseCode === 'C') { view_C.classList.remove('hidden'); tab_C.classList.remove('bg-white', 'text-gray-600'); tab_C.classList.add('bg-green-600', 'text-white', 'border-green-800'); }
+        else if (courseCode === 'D') { view_D.classList.remove('hidden'); tab_D.classList.remove('bg-white', 'text-gray-600'); tab_D.classList.add('bg-green-600', 'text-white', 'border-green-800'); }
+    }
+    tab_AB.onclick = () => switchCourseView('AB'); tab_CD.onclick = () => switchCourseView('CD'); tab_C.onclick = () => switchCourseView('C'); tab_D.onclick = () => switchCourseView('D');
+
+    // --- Load Bookings (unchanged logic) ---
+    let unsubscribeBookings = null;
+    async function loadBookings() {
+      const date = datePicker.value;
+      updateLayoutByDate(date);
+      if (unsubscribeBookings) unsubscribeBookings();
+      unsubscribeBookings = db.collection('tee_bookings').where('date', '==', date).onSnapshot(qs => {
+          const bookingsByTime = {};
+          qs.forEach(doc => { const data = doc.data(); const time = data.time; if (!bookingsByTime[time]) bookingsByTime[time] = []; bookingsByTime[time].push({ id: doc.id, ...data }); });
+          allBookingsForSearch = bookingsByTime;
+          renderBookingTable(date, searchInput.value.trim()); 
+      });
+    }
+
+    let unsubscribeClosedCourses = null;
+    async function loadClosedCoursesForDate(date) {
+      if (unsubscribeClosedCourses) unsubscribeClosedCourses();
+      unsubscribeClosedCourses = db.collection('closed_courses').where('date', '==', date).onSnapshot(qs => {
+          closedCourseSlots = []; const allTimeSlots = generateTimeSlots();
+          qs.forEach(doc => {
+            const data = doc.data(); const { startTime, endTime, courses, note, isTournament } = data; // [MODIFIED] Added isTournament
+            let startIndex = allTimeSlots.indexOf(startTime); let endIndex = allTimeSlots.indexOf(endTime);
+            if (startIndex === -1 || endIndex === -1) return;
+            for (let i = startIndex; i <= endIndex; i++) {
+              const time = allTimeSlots[i]; const existing = closedCourseSlots.find(s => s.time === time);
+              if (existing) {
+                  existing.courses = [...new Set([...existing.courses, ...courses])];
+                  if(note) existing.note = (existing.note ? existing.note + ', ' : '') + note;
+                  if(isTournament) existing.isTournament = true; // Flag as tournament
+              } else {
+                  closedCourseSlots.push({ time: time, courses: [...courses], note: note || '', isTournament: !!isTournament });
+              }
+            }
+          });
+          renderBookingTable(datePicker.value, searchInput.value.trim());
+          if (!bookingModal.classList.contains('hidden')) updateCourseCheckboxesForTime(timeInput.value, courseCheckboxesDiv, editingId);
+          if (!groupBookingModal.classList.contains('hidden')) updateCourseCheckboxesForTime(groupTimeInput.value, groupCourseCheckboxes, null);
+      });
+    }
+    datePicker.onchange = () => { loadBookings(); loadClosedCoursesForDate(datePicker.value); };
+
+    // --- Delete All Logic (unchanged) ---
+    deleteAllBtn.onclick = async () => {
+        if (!currentStaff) return;
+        const date = datePicker.value;
+        if (!confirm(`อันตราย! คุณกำลังจะลบการจอง "ทั้งหมด" ของวันที่ ${date}?\nการกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
+        if (!confirm(`ยืนยันครั้งที่ 2: ต้องการลบข้อมูลทั้งหมดในวันที่ ${date} จริงหรือไม่?`)) return;
+
+        try {
+            const qs = await db.collection('tee_bookings').where('date', '==', date).get();
+            if (qs.empty) { alert("ไม่พบข้อมูลการจองในวันนี้"); return; }
+
+            const batch = db.batch();
+            qs.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+
+            logActivity('ลบการจองทั้งหมดของวัน', { date: date, count: qs.size });
+            alert(`ลบข้อมูลเรียบร้อยแล้ว (${qs.size} รายการ)`);
+        } catch (error) {
+            console.error(error);
+            alert("เกิดข้อผิดพลาดในการลบ: " + error.message);
+        }
+    };
+
+    // --- Caddy Leave Logic (unchanged) ---
+    let unsubscribeCaddyLeaves = null;
+    let editingLeaveId = null;
+
+    function loadCaddyLeaves() {
+        if (unsubscribeCaddyLeaves) unsubscribeCaddyLeaves();
+        unsubscribeCaddyLeaves = db.collection('caddy_leaves').onSnapshot(qs => {
+            allCaddyLeaves = [];
+            caddyLeaveTableBody.innerHTML = '';
+            let docsData = [];
+            qs.forEach(doc => { docsData.push({ id: doc.id, ...doc.data() }); });
+            docsData.sort((a, b) => {
+                if (a.date > b.date) return -1;
+                if (a.date < b.date) return 1;
+                if (a.caddy < b.caddy) return -1;
+                if (a.caddy > b.caddy) return 1;
+                return 0;
+            });
+            docsData.forEach(d => {
+                allCaddyLeaves.push(d);
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td class="border px-3 py-2">${d.date}</td><td class="border px-3 py-2 font-bold">${d.caddy}</td><td class="border px-3 py-2">${d.note || '-'}</td><td class="border px-3 py-2 text-center manage-col"><button class="text-blue-600 underline mr-2 editLeaveBtn" data-id="${d.id}">แก้ไข</button><button class="text-red-600 underline delLeaveBtn" data-id="${d.id}">ลบ</button></td>`;
+                caddyLeaveTableBody.appendChild(tr);
+            });
+            if(currentStaff) document.querySelectorAll('.manage-col').forEach(el => el.style.display = 'table-cell');
+            else document.querySelectorAll('.manage-col').forEach(el => el.style.display = 'none');
+        });
+    }
+
+    openAddCaddyLeaveBtn.onclick = () => {
+        caddyLeaveModalTitle.textContent = "บันทึก Caddy ลา (ช่วงวัน)";
+        caddyLeaveForm.reset(); editingLeaveId = null;
+        if (leaveStartDateDiv) leaveStartDateDiv.classList.remove('hidden'); 
+        if (leaveEndDateDiv) leaveEndDateDiv.classList.remove('hidden'); 
+        leaveStartDateInput.removeAttribute('disabled'); leaveEndDateInput.removeAttribute('disabled');
+        leaveStartDateInput.setAttribute('required', 'required'); leaveEndDateInput.setAttribute('required', 'required');
+        leaveStartDateInput.value = todayStr(); leaveEndDateInput.value = todayStr();
+        caddyLeaveModal.classList.remove('hidden');
+    };
+    leaveCancelBtn.onclick = () => { caddyLeaveModal.classList.add('hidden'); };
+    
+    caddyLeaveForm.onsubmit = async (e) => {
+        e.preventDefault();
+        const caddy = leaveCaddyInput.value.trim(); const note = leaveNoteInput.value.trim();
+        const collectionRef = db.collection('caddy_leaves');
+        if (!caddy) { alert('กรุณากรอกเลขที่แคดดี้'); return; }
+
+        if (editingLeaveId) {
+            const originalItem = allCaddyLeaves.find(i => i.id === editingLeaveId);
+            if (!originalItem) return;
+            if (caddy !== originalItem.caddy && checkCaddyLeave(caddy, originalItem.date)) return;
+            const data = { caddy: caddy, date: originalItem.date, note: note, updatedAt: new Date().toISOString() };
+            if (caddy !== originalItem.caddy) {
+                if (confirm(`คุณต้องการเปลี่ยนแคดดี้ ${originalItem.caddy} เป็น ${caddy} สำหรับวันที่ ${originalItem.date} ใช่หรือไม่?`)) {
+                    try { let batch = db.batch(); batch.delete(collectionRef.doc(editingLeaveId));
+                        const newDocId = `${caddy}-${originalItem.date}`; batch.set(collectionRef.doc(newDocId), { ...data, createdAt: new Date().toISOString() });
+                        await batch.commit(); logActivity('แก้ไขวันลา Caddy (เปลี่ยนเบอร์)', { oldId: editingLeaveId, newId: newDocId, ...data });
+                    } catch (err) { alert('เกิดข้อผิดพลาดในการแก้ไขข้อมูล: ' + err.message); }
+                } else return;
+            } else {
+                 try { await collectionRef.doc(editingLeaveId).set(data, { merge: true }); logActivity('แก้ไขวันลา Caddy (เปลี่ยนหมายเหตุ)', { id: editingLeaveId, ...data }); } catch (err) { alert('เกิดข้อผิดพลาด: ' + err.message); }
+            }
+            caddyLeaveModal.classList.add('hidden'); return;
+        }
+
+        const startDate = leaveStartDateInput.value; const endDate = leaveEndDateInput.value;
+        if (!startDate || !endDate) { alert('กรุณากรอกวันที่เริ่มต้นและสิ้นสุด'); return; }
+        let currentDate = new Date(startDate); const end = new Date(endDate); const datesToSave = [];
+        if (currentDate > end) { alert('วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด'); return; }
+        while (currentDate <= end) { datesToSave.push(currentDate.toISOString().slice(0, 10)); currentDate.setDate(currentDate.getDate() + 1); }
+        let batch = db.batch(); let conflicts = [];
+        const caddyDateChecks = datesToSave.map(date => `${caddy}-${date}`);
+        try {
+            for (let i = 0; i < caddyDateChecks.length; i += 10) {
+                const chunk = caddyDateChecks.slice(i, i + 10);
+                const checkQuery = await collectionRef.where(firebase.firestore.FieldPath.documentId(), 'in', chunk).get();
+                checkQuery.forEach(doc => { conflicts.push(doc.id.split('-').pop()); });
+            }
+        } catch (e) { console.warn("Error during conflict check:", e); }
+        if (conflicts.length > 0) {
+            const conflictDatesStr = conflicts.slice(0, 5).join(', ') + (conflicts.length > 5 ? ' และอีก...' : '');
+            if (!confirm(`เบอร์แคดดี้ ${caddy} มีวันลาซ้ำอยู่แล้วในวันที่ ${conflictDatesStr} คุณต้องการบันทึกทับหรือไม่?`)) { return; }
+        }
+        for (const date of datesToSave) {
+            const docId = `${caddy}-${date}`;
+            batch.set(collectionRef.doc(docId), { caddy, date, note, createdAt: new Date().toISOString(), rangeStart: startDate, rangeEnd: endDate });
+        }
+        try { await batch.commit(); logActivity('เพิ่มวันลา Caddy (ช่วงวัน)', { caddy, rangeStart: startDate, rangeEnd: endDate, totalDays: datesToSave.length }); caddyLeaveModal.classList.add('hidden'); } catch (err) { alert('เกิดข้อผิดพลาด: ' + err.message); }
+    };
+
+    caddyLeaveTableBody.addEventListener('click', async (e) => {
+        if (!currentStaff) return;
+        const t = e.target;
+        if (t.classList.contains('editLeaveBtn')) {
+            const id = t.dataset.id; const item = allCaddyLeaves.find(i => i.id === id);
+            if (item) {
+                editingLeaveId = id; caddyLeaveModalTitle.textContent = "แก้ไข Caddy ลา (วันที่: " + item.date + ")";
+                leaveCaddyInput.value = item.caddy; leaveNoteInput.value = item.note || '';
+                if (leaveStartDateDiv) leaveStartDateDiv.classList.remove('hidden'); 
+                if (leaveEndDateDiv) leaveEndDateDiv.classList.add('hidden');
+                leaveStartDateInput.value = item.date; leaveStartDateInput.setAttribute('disabled', 'disabled');
+                leaveStartDateInput.removeAttribute('required'); leaveEndDateInput.removeAttribute('required');
+                caddyLeaveModal.classList.remove('hidden');
+            }
+        }
+        if (t.classList.contains('delLeaveBtn')) {
+            if (confirm('ยืนยันการลบข้อมูลการลาสำหรับวันเดียวนี้?')) {
+                try { await db.collection('caddy_leaves').doc(t.dataset.id).delete(); logActivity('ลบวันลา Caddy', { id: t.dataset.id }); } catch (err) { alert('เกิดข้อผิดพลาด: ' + err.message); }
+            }
+        }
+    });
+
+    function checkCaddyLeave(caddyNumber, bookingDate) {
+        if (!caddyNumber || !bookingDate) return false;
+        const leaveId = `${caddyNumber}-${bookingDate}`;
+        const leaveRecord = allCaddyLeaves.find(l => l.id === leaveId); 
+        if (leaveRecord) { const [y, m, d] = bookingDate.split('-'); alert(`Caddy No. ${caddyNumber} ลาวันที่ ${d}/${m}/${y}`); return true; }
+        return false;
+    }
+
+    // --- Main Table Rendering (MODIFIED) ---
+    function renderBookingTable(date, searchTerm) {
+        bookingTableBody_A.innerHTML = ''; bookingTableBody_B.innerHTML = ''; bookingTableBody_C.innerHTML = ''; bookingTableBody_D.innerHTML = ''; bookingTableBody_AB.innerHTML = ''; bookingTableBody_CD.innerHTML = '';
+        const lowerSearch = (searchTerm || '').toLowerCase();
+        let count = { A:0, B:0, C:0, D:0, AB:0, CD:0 };
+
+        Object.values(allBookingsForSearch).forEach(bookingArray => {
+            bookingArray.forEach(b => { 
+                if (b && b.count) {
+                    const c = Number(b.count); const crs = b.course || [];
+                    if (crs.length === 1 && crs[0] === 'A') count.A += c;
+                    else if (crs.length === 1 && crs[0] === 'B') count.B += c;
+                    else if (crs.length === 1 && crs[0] === 'C') count.C += c;
+                    else if (crs.length === 1 && crs[0] === 'D') count.D += c;
+                    else if (crs.length === 2 && crs.includes('A') && crs.includes('B')) count.AB += c;
+                    else if (crs.length === 2 && crs.includes('C') && crs.includes('D')) count.CD += c;
+                }
+            });
+        });
+        totalBookingCount_A.textContent = `ยอดจองรวม (คอร์ส A): ${count.A} คน`; totalBookingCount_B.textContent = `ยอดจองรวม (คอร์ส B): ${count.B} คน`; totalBookingCount_C.textContent = `ยอดจองรวม (คอร์ส C): ${count.C} คน`; totalBookingCount_D.textContent = `ยอดจองรวม (คอร์ส D): ${count.D} คน`; totalBookingCount_AB.textContent = `ยอดจองรวม (คอร์ส AB): ${count.AB} คน`; totalBookingCount_CD.textContent = `ยอดจองรวม (คอร์ส CD): ${count.CD} คน`;
+
+        generateTimeSlots().forEach(time => {
+            const closedInfo = closedCourseSlots.find(s => s.time === time);
+            const allBookingsForTime = allBookingsForSearch[time] || [];
+            const filteredBookings = allBookingsForTime.filter(b => { if (!lowerSearch) return true; return (b.customer || '').toLowerCase().includes(lowerSearch); });
+            const isClosed_A = closedInfo?.courses?.includes('A') || false; const isClosed_B = closedInfo?.courses?.includes('B') || false; const isClosed_C = closedInfo?.courses?.includes('C') || false; const isClosed_D = closedInfo?.courses?.includes('D') || false;
+            const isClosed_AB = isClosed_A || isClosed_B; const isClosed_CD = isClosed_C || isClosed_D;
+
+            // Pass closedInfo to render helper to access note and tournament status
+            renderRowHelper(bookingTableBody_AB, time, filteredBookings.filter(b => b.course?.length === 2 && b.course.includes('A') && b.course.includes('B')), isClosed_AB, 'AB', closedInfo);
+            renderRowHelper(bookingTableBody_CD, time, filteredBookings.filter(b => b.course?.length === 2 && b.course.includes('C') && b.course.includes('D')), isClosed_CD, 'CD', closedInfo);
+            
+            // [MODIFIED] Changed logic from length==1 to includes() to handle multiple courses (e.g. C,D booking showing on C table)
+            renderRowHelper(bookingTableBody_C, time, filteredBookings.filter(b => b.course?.includes('C')), isClosed_C, 'C', closedInfo);
+            renderRowHelper(bookingTableBody_D, time, filteredBookings.filter(b => b.course?.includes('D')), isClosed_D, 'D', closedInfo);
+        });
+
+        // Toggle columns visibility
+        const isStaff = !!currentStaff;
+        document.querySelectorAll('.staff-only-col').forEach(col => col.style.display = isStaff ? 'table-cell' : 'none');
+        document.querySelectorAll('.manage-col').forEach(col => col.style.display = isStaff ? 'table-cell' : 'none');
+        document.querySelectorAll('.staff-only-section').forEach(el => el.style.display = isStaff ? 'flex' : 'none'); // Use flex for staff-only section
+    }
+
+    function renderRowHelper(tbody, time, bookings, isClosed, courseIdentifier, closedInfo) {
+        const numBookings = bookings.length;
+        if (numBookings === 0) {
+            const tr = document.createElement('tr');
+            
+            // [MODIFIED] Check for Tournament Status
+            const isTournament = isClosed && closedInfo && closedInfo.isTournament;
+            tr.className = isTournament ? 'tournament-row' : (isClosed ? 'closed-row' : '');
+            
+            const noteText = isClosed && closedInfo && closedInfo.note ? closedInfo.note : '';
+            
+            // Tournament Watermark SVG
+            const trophyIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path><path d="M4 22h16"></path><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path></svg>`;
+            const watermarkHtml = isTournament ? `<div class="tournament-watermark">${trophyIcon} ปิดแข่ง</div>` : '';
+
+            // [MODIFIED] Inject watermark into Customer cell if tournament
+            const customerCellContent = isTournament ? watermarkHtml : '';
+
+            tr.innerHTML = `
+                <td class="border px-3 py-2">${time}</td> 
+                <td class="border px-3 py-2 relative">${customerCellContent}</td> 
+                <td class="border px-3 py-2 text-center"></td> 
+                <td class="border px-3 py-2 text-center staff-only-col"></td>
+                <td class="border px-3 py-2 text-center staff-only-col"></td>
+                <td class="border px-3 py-2"></td> 
+                <td class="border px-3 py-2 text-center font-bold text-red-700">${isClosed ? 'ปิด' : ''}</td> 
+                <td class="border px-3 py-2 hide-mobile"></td> 
+                <td class="border px-3 py-2 hide-mobile"></td> 
+                <td class="border px-3 py-2 hide-mobile">${noteText}</td> 
+                <td class="border px-3 py-2 text-center manage-col"> 
+                    <button type="button" class="bookBtn ${isClosed ? 'bg-gray-400' : 'bg-blue-500'} text-white px-2 py-1 rounded text-xs mr-1" data-time="${time}" data-course-id="${courseIdentifier}" ${isClosed ? 'disabled' : ''}>${isClosed ? 'ปิด' : 'จอง'}</button>
+                    <button type="button" class="groupBookBtn ${isClosed ? 'bg-gray-400' : 'bg-teal-700'} text-white px-2 py-1 rounded text-xs" data-time="${time}" data-course-id="${courseIdentifier}" ${isClosed ? 'disabled' : ''}>+ก๊วน</button>
+                </td>`;
+            tbody.appendChild(tr);
+        } else {
+            bookings.forEach((b, index) => {
+                const tr = document.createElement('tr'); tr.className = 'booking-row';
+                let timeCellHtml = index === 0 ? `<td class="border px-3 py-2 align-top" rowspan="${numBookings}">${time}</td>` : '';
+                tr.innerHTML = `
+                    ${timeCellHtml}
+                    <td class="border px-3 py-2">${b?.customer || ''}</td> 
+                    <td class="border px-3 py-2 text-center">${b?.count || ''}</td> 
+                    <td class="border px-3 py-2 text-center staff-only-col">${b?.phone || ''}</td>
+                    <td class="border px-3 py-2 text-center staff-only-col">${b?.price || ''}</td>
+                    <td class="border px-3 py-2">${b?.caddy || ''}</td> 
+                    <td class="border px-3 py-2 text-center">${b?.course?.join(',') || ''}</td> 
+                    <td class="border px-3 py-2 hide-mobile">${b?.staff || ''}</td> 
+                    <td class="border px-3 py-2 hide-mobile">${b?.createdAt ? b.createdAt.split('T')[0] : ''}</td> 
+                    <td class="border px-3 py-2 hide-mobile">${b?.note || ''}</td> 
+                    <td class="border px-3 py-2 text-center manage-col"> 
+                        <button type="button" class="editBtn text-blue-600 underline mr-2" data-id="${b.id}">แก้ไข</button>
+                        <button type="button" class="delBtn text-red-600 underline" data-id="${b.id}">ลบ</button>
+                    </td>`;
+                tbody.appendChild(tr);
+            });
+        }
+    }
+
+    async function tableClickHandler(e) {
+      if (!currentStaff) return; 
+      const t = e.target;
+      // Normal Booking
+      if (t.classList.contains('bookBtn')) {
+        const courseId = t.dataset.courseId; modalTitle.textContent = "จอง Tee Time"; bookingForm.reset(); fillTimeOptions(timeInput); timeInput.value = t.dataset.time; editingId = null; modalDateInput.value = datePicker.value; staffInput.value = currentStaff; staffInput.disabled = true; bookingModal.classList.remove('hidden'); updateCourseCheckboxesForTime(t.dataset.time, courseCheckboxesDiv, null); bookingForm.querySelectorAll('input[name="course"]').forEach(cb => cb.checked = false);
+        if (courseId === 'AB') { const cbA = bookingForm.querySelector('input[value="A"]'); const cbB = bookingForm.querySelector('input[value="B"]'); if (cbA && !cbA.disabled) cbA.checked = true; if (cbB && !cbB.disabled) cbB.checked = true; } 
+        else if (courseId === 'CD') { const cbC = bookingForm.querySelector('input[value="C"]'); const cbD = bookingForm.querySelector('input[value="D"]'); if (cbC && !cbC.disabled) cbC.checked = true; if (cbD && !cbD.disabled) cbD.checked = true; } 
+        else { const courseCb = bookingForm.querySelector(`input[value="${courseId}"]`); if (courseCb && !courseCb.disabled) courseCb.checked = true; }
+      }
+      // Group Booking from Table
+      if (t.classList.contains('groupBookBtn')) {
+        const courseId = t.dataset.courseId; groupBookingForm.reset(); editingId = null; groupModalDateInput.value = datePicker.value; groupTimeInput.value = t.dataset.time; groupStaffInput.value = currentStaff; groupStaffInput.disabled = true; groupBookingModal.classList.remove('hidden'); updateCourseCheckboxesForTime(t.dataset.time, groupCourseCheckboxes, null); groupBookingForm.querySelectorAll('input[name="course"]').forEach(cb => cb.checked = false);
+         if (courseId === 'AB') { const cbA = groupBookingForm.querySelector('input[value="A"]'); const cbB = groupBookingForm.querySelector('input[value="B"]'); if (cbA && !cbA.disabled) cbA.checked = true; if (cbB && !cbB.disabled) cbB.checked = true; } 
+        else if (courseId === 'CD') { const cbC = groupBookingForm.querySelector('input[value="C"]'); const cbD = groupBookingForm.querySelector('input[value="D"]'); if (cbC && !cbC.disabled) cbC.checked = true; if (cbD && !cbD.disabled) cbD.checked = true; } 
+        else { const courseCb = groupBookingForm.querySelector(`input[value="${courseId}"]`); if (courseCb && !courseCb.disabled) courseCb.checked = true; }
+      }
+      
+      if (t.classList.contains('editBtn')) {
+        const doc = await db.collection('tee_bookings').doc(t.dataset.id).get(); const d = doc.data(); 
+        modalTitle.textContent = "แก้ไขการจอง"; fillTimeOptions(timeInput); 
+        timeInput.value = d.time; 
+        customerInput.value = d.customer; 
+        phoneInput.value = d.phone || ''; 
+        priceInput.value = d.price || ''; 
+        countInput.value = d.count; 
+        caddyInput.value = d.caddy || ''; 
+        staffInput.value = currentStaff; staffInput.disabled = true; 
+        noteInput.value = d.note || ''; 
+        bookingForm.querySelectorAll('input[name="course"]').forEach(cb => cb.checked = d.course?.includes(cb.value)); 
+        editingId = t.dataset.id; modalDateInput.value = d.date || datePicker.value; 
+        bookingModal.classList.remove('hidden'); updateCourseCheckboxesForTime(d.time, courseCheckboxesDiv, editingId); 
+      }
+      if (t.classList.contains('delBtn')) {
+        const bookingId = t.dataset.id; if (confirm('ลบการจองนี้?')) { await db.collection('tee_bookings').doc(bookingId).delete(); logActivity('ลบการจอง', { id: bookingId, table: 'main', date: datePicker.value }); if (!summarySection.classList.contains('hidden')) loadSummaryBookings(); }
+      }
+    };
+    // SAFE ASSIGNMENT
+    if(bookingTableBody_A) bookingTableBody_A.onclick = tableClickHandler; 
+    if(bookingTableBody_B) bookingTableBody_B.onclick = tableClickHandler; 
+    if(bookingTableBody_C) bookingTableBody_C.onclick = tableClickHandler; 
+    if(bookingTableBody_D) bookingTableBody_D.onclick = tableClickHandler; 
+    if(bookingTableBody_AB) bookingTableBody_AB.onclick = tableClickHandler;
+    if(bookingTableBody_CD) bookingTableBody_CD.onclick = tableClickHandler;
+
+    // --- Booking Submit (MODIFIED for Multiple Caddies) ---
+    bookingForm.onsubmit = async (e) => {
+      e.preventDefault(); if (!currentStaff) return;
+      const date = modalDateInput.value; const time = timeInput.value; const customer = customerInput.value.trim(); const count = Number(countInput.value); const caddy = caddyInput.value.trim(); const staff = staffInput.value.trim(); const note = noteInput.value.trim(); const course = Array.from(bookingForm.querySelectorAll('input[name="course"]:checked')).map(cb => cb.value);
+      const phone = phoneInput.value.trim(); 
+      const price = priceInput.value.trim(); 
+      
+      if (!customer || !count || !time || !date) return alert('กรุณากรอกข้อมูลให้ครบ'); if (course.length === 0) return alert('กรุณาเลือกคอร์ส'); 
+      
+      // Parse caddies (split by comma)
+      const caddyList = caddy ? caddy.split(',').map(s => s.trim()).filter(s => s) : [];
+
+      // Check Leave for each caddy
+      for (const c of caddyList) {
+          if(checkCaddyLeave(c, date)) return;
+      }
+      
+      // Check Duplicate for each caddy
+      if (caddyList.length > 0) {
+        try { 
+            const checkQuery = db.collection('tee_bookings').where('date', '==', date); 
+            const snapshot = await checkQuery.get(); 
+            
+            for (const doc of snapshot.docs) { 
+                if (editingId && doc.id === editingId) continue; 
+                const existingBooking = doc.data(); 
+                const existingCaddyStr = existingBooking.caddy || ''; 
+                // Split existing caddy string to array
+                const existingCaddies = existingCaddyStr.split(',').map(s => s.trim()).filter(s => s);
+                
+                // Check for intersection
+                const conflictingCaddies = caddyList.filter(newC => existingCaddies.includes(newC));
+
+                if (conflictingCaddies.length > 0) { 
+                     alert(`เบอร์ ${conflictingCaddies.join(', ')} มีการจองซ้ำในเวลา ${existingBooking.time} (ลูกค้า: ${existingBooking.customer})`); 
+                     return;
+                } 
+            } 
+        } catch (err) { console.error(err); }
+      }
+      
+      const data = { date, time, customer, count, caddy, staff, note, course, phone, price, createdAt: new Date().toISOString() };
+      try { if (editingId) { await db.collection('tee_bookings').doc(editingId).set(data); logActivity('แก้ไขการจอง', { id: editingId, ...data }); } else { const newDoc = await db.collection('tee_bookings').add(data); logActivity('เพิ่มการจองใหม่', { id: newDoc.id, ...data }); } bookingModal.classList.add('hidden'); if (!summarySection.classList.contains('hidden')) loadSummaryBookings(); } catch (error) { alert('เกิดข้อผิดพลาด: ' + error.message); } finally { staffInput.disabled = false; }
+    };
+
+    // --- Group Booking Submit (MODIFIED for Multiple Caddies) ---
+    groupBookingForm.onsubmit = async (e) => {
+        e.preventDefault(); if (!currentStaff) return;
+        const date = groupModalDateInput.value; const startTime = groupTimeInput.value; const customer = groupCustomerInput.value.trim(); const totalCount = Number(groupCountInput.value); const caddy = groupCaddyInput.value.trim(); const staff = groupStaffInput.value.trim(); const note = groupNoteInput.value.trim(); const courses = Array.from(groupBookingForm.querySelectorAll('input[name="course"]:checked')).map(cb => cb.value);
+        const phone = groupPhoneInput.value.trim(); 
+        const price = groupPriceInput.value.trim(); 
+        
+        if (!customer || !totalCount || !startTime || !date) return alert('กรุณากรอกข้อมูลให้ครบ'); if (totalCount <= 0) return alert('จำนวนต้องมากกว่า 0'); if (courses.length === 0) return alert('กรุณาเลือกคอร์ส');
+
+        // Parse caddies (split by comma)
+        const caddyList = caddy ? caddy.split(',').map(s => s.trim()).filter(s => s) : [];
+
+        // Check Leave for each caddy
+        for (const c of caddyList) {
+            if(checkCaddyLeave(c, date)) return;
+        }
+        
+        // Note: For Group Booking, we check caddy conflict slightly differently because group splits into multiple slots.
+        // However, if specific caddies are requested for the group, they shouldn't be busy *at all* during the group blocks.
+        // To simplify and ensure safety, we check if ANY of these caddies are busy on that DAY (or at least intersecting times).
+        // Since group booking logic is complex regarding slots, let's check basic conflict first.
+
+         if (caddyList.length > 0) {
+            try { 
+                const checkQuery = db.collection('tee_bookings').where('date', '==', date); 
+                const snapshot = await checkQuery.get(); 
+                for (const doc of snapshot.docs) { 
+                    const existingBooking = doc.data(); 
+                    const existingCaddies = (existingBooking.caddy || '').split(',').map(s => s.trim()).filter(s => s);
+                    const conflictingCaddies = caddyList.filter(newC => existingCaddies.includes(newC));
+                    if (conflictingCaddies.length > 0) { 
+                         // Warning: This checks ANY time on that date. 
+                         // Ideally we should only check if time overlaps, but group booking spans multiple slots.
+                         // For safety, let's warn if they are booked at ANY time on that day, or rely on user judgment if times are far apart?
+                         // Better safe: Warning.
+                         if(!confirm(`เบอร์ ${conflictingCaddies.join(', ')} มีการจองอยู่ในเวลา ${existingBooking.time} \nคุณต้องการยืนยันการจองก๊วนซ้ำหรือไม่?`)) return;
+                    } 
+                } 
+            } catch (err) { console.error(err); }
+         }
+
+
+        const allTimeSlots = generateTimeSlots(); 
+        const numBookingsNeeded = Math.ceil(totalCount / 4); 
+        
+        let currentSlotIndex = allTimeSlots.indexOf(startTime);
+        let slotsToBook = []; let potentialConflicts = []; let foundSlots = 0;
+        while (foundSlots < numBookingsNeeded && currentSlotIndex < allTimeSlots.length) {
+            const time = allTimeSlots[currentSlotIndex]; let hasConflict = false; const closedInfo = closedCourseSlots.find(s => s.time === time);
+            if (closedInfo) { for (const course of courses) { if (closedInfo.courses.includes(course)) { hasConflict = true; break; } } }
+            if (!hasConflict) { const bookingsForTime = allBookingsForSearch[time] || []; for (const booking of bookingsForTime) { if (booking.course) { for (const course of courses) { if (booking.course.includes(course)) { hasConflict = true; break; } } } if (hasConflict) break; } }
+            if (hasConflict) potentialConflicts.push(time); slotsToBook.push({ time: time, hasConflict: hasConflict }); foundSlots++; currentSlotIndex++;
+        }
+        if (foundSlots < numBookingsNeeded) return alert(`จองได้เพียง ${foundSlots} รอบเท่านั้น (เวลาหมด)`);
+        const baseBookingData = { date, customer, caddy, staff, note, course: courses, phone, price, createdAt: new Date().toISOString() };
+        if (potentialConflicts.length > 0) showGroupConflictModal(potentialConflicts, () => { bookGroupSlots(slotsToBook, baseBookingData, totalCount, true); }); else bookGroupSlots(slotsToBook, baseBookingData, totalCount, false);
+    };
+    function showGroupConflictModal(conflictTimes, continueCallback) {
+        const modal = document.createElement('div'); modal.style = "position:fixed;z-index:9999;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;"; modal.innerHTML = `<div style="background:white;padding:2rem;border-radius:1rem;max-width:400px;text-align:center;"><h3 class="text-xl font-bold mb-4 text-red-600">เวลาซ้ำ: ${conflictTimes.join(', ')}</h3><p class="mb-4">ต้องการจองต่อ (ข้ามเวลาที่ซ้ำ) หรือยกเลิก?</p><button id="conflictCancel" class="bg-gray-400 text-white px-4 py-2 rounded mr-2">ยกเลิก</button><button id="conflictContinue" class="bg-teal-600 text-white px-4 py-2 rounded">จองต่อ</button></div>`;
+        document.body.appendChild(modal); modal.querySelector('#conflictCancel').onclick = () => document.body.removeChild(modal); modal.querySelector('#conflictContinue').onclick = () => { document.body.removeChild(modal); continueCallback(); };
+    }
+    async function bookGroupSlots(slots, baseData, totalCount, skipConflicts) {
+        let slotsToUse = skipConflicts ? slots.filter(s => !s.hasConflict) : slots;
+        try { let batch = db.batch(); let remainingCount = totalCount; for (const slot of slotsToUse) { if (remainingCount <= 0) break; 
+            const count = Math.min(remainingCount, 4); 
+            remainingCount -= count; const ref = db.collection('tee_bookings').doc(); batch.set(ref, { ...baseData, time: slot.time, count }); } await batch.commit(); logActivity('จองก๊วน', { ...baseData, totalCount }); groupBookingModal.classList.add('hidden'); if (!summarySection.classList.contains('hidden')) loadSummaryBookings(); } catch (error) { alert('Error: ' + error.message); }
+    }
+
+    searchInput.addEventListener('input', () => { renderBookingTable(datePicker.value, searchInput.value.trim()); });
+
+    let unsubscribeSummary = null; let allSummaryBookings = [];
+    async function loadSummaryBookings() {
+      if (unsubscribeSummary) unsubscribeSummary(); unsubscribeSummary = db.collection('tee_bookings').onSnapshot(qs => { allSummaryBookings = []; qs.forEach(doc => { const d = doc.data(); allSummaryBookings.push({ ...d, id: doc.id }); }); allSummaryBookings = allSummaryBookings.filter(d => d.customer && d.customer.trim()); renderSummaryTable(); });
+    }
+    function renderSummaryTable() {
+      let rows = allSummaryBookings.slice(); const searchCustomer = (summarySearchInput.value || '').toLowerCase(); const searchCaddy = (summaryCaddySearchInput.value || '').trim(); const searchDate = summaryDatePicker.value;
+      let totalRowsForCount = allSummaryBookings.slice(); if (searchDate) totalRowsForCount = totalRowsForCount.filter(r => r.date === searchDate);
+      let totalCount = 0; totalRowsForCount.forEach(r => { totalCount += Number(r.count || 0); });
+      summaryTotalBookingCount.textContent = searchDate ? `ยอดจองรวม (วันที่ ${searchDate}): ${totalCount} คน` : `ยอดจองรวม (ทั้งหมด): ${totalCount} คน`;
+      if (searchDate) rows = rows.filter(r => r.date === searchDate); if (searchCustomer) rows = rows.filter(r => (r.customer || '').toLowerCase().includes(searchCustomer)); if (searchCaddy) rows = rows.filter(r => (r.caddy || '').includes(searchCaddy));
+      const sortType = summarySortSelect.value; if (sortType === 'dateDesc') rows.sort((a, b) => (b.date + ' ' + b.time).localeCompare(a.date + ' ' + a.time)); else rows.sort((a, b) => (a.date + ' ' + a.time).localeCompare(b.date + ' ' + b.time));
+      summaryTableBody.innerHTML = ''; rows.forEach(r => { const tr = document.createElement('tr'); 
+        tr.innerHTML = `<td class="border px-3 py-2">${r.date || ''}</td> <td class="border px-3 py-2">${r.time || ''}</td> <td class="border px-3 py-2">${r.customer || ''}</td> <td class="border px-3 py-2 text-center">${r.count || ''}</td> 
+        <td class="border px-3 py-2 text-center staff-only-col">${r.phone || ''}</td>
+        <td class="border px-3 py-2 text-center staff-only-col">${r.price || ''}</td>
+        <td class="border px-3 py-2">${r.caddy || ''}</td> <td class="border px-3 py-2 text-center">${r.course?.join(',') || ''}</td> <td class="border px-3 py-2">${r.staff || ''}</td> <td class="border px-3 py-2">${r.note || ''}</td> <td class="border px-3 py-2 text-center manage-col"> <button class="summaryEditBtn text-blue-600 underline mr-2" data-id="${r.id}">แก้ไข</button><button class="summaryDelBtn text-red-600 underline" data-id="${r.id}">ลบ</button></td>`; summaryTableBody.appendChild(tr); 
+      });
+      const isStaff = !!currentStaff;
+      document.querySelectorAll('.staff-only-col').forEach(col => col.style.display = isStaff ? 'table-cell' : 'none');
+    }
+    summarySearchInput.addEventListener('input', renderSummaryTable); summarySortSelect.addEventListener('change', renderSummaryTable); summaryCaddySearchInput.addEventListener('input', renderSummaryTable); summaryDatePicker.addEventListener('change', renderSummaryTable); summaryClearDateBtn.onclick = () => { summaryDatePicker.value = ''; renderSummaryTable(); };
+    summaryTableBody.addEventListener('click', async (e) => { if (!currentStaff) return; const t = e.target; if (t.classList.contains('summaryDelBtn')) { if (confirm('ลบ?')) { await db.collection('tee_bookings').doc(t.dataset.id).delete(); } } if (t.classList.contains('summaryEditBtn')) { const doc = await db.collection('tee_bookings').doc(t.dataset.id).get(); const d = doc.data(); 
+        modalTitle.textContent = "แก้ไขการจอง"; fillTimeOptions(timeInput); timeInput.value = d.time; customerInput.value = d.customer; 
+        phoneInput.value = d.phone || ''; priceInput.value = d.price || ''; 
+        countInput.value = d.count; caddyInput.value = d.caddy || ''; staffInput.value = currentStaff; staffInput.disabled = true; noteInput.value = d.note || ''; bookingForm.querySelectorAll('input[name="course"]').forEach(cb => cb.checked = d.course?.includes(cb.value)); editingId = t.dataset.id; modalDateInput.value = d.date || datePicker.value; bookingModal.classList.remove('hidden'); updateCourseCheckboxesForTime(d.time, courseCheckboxesDiv, editingId); } });
+
+    let unsubscribeAllClosedCourses = null;
+    function loadClosedCourses() {
+       if (unsubscribeAllClosedCourses) unsubscribeAllClosedCourses(); unsubscribeAllClosedCourses = db.collection('closed_courses').orderBy('date', 'desc').onSnapshot(qs => { closedCoursesTableBody.innerHTML = ''; qs.forEach(doc => { const d = doc.data(); const tr = document.createElement('tr'); 
+        // [MODIFIED] Show Type
+        const typeText = d.isTournament ? '<span class="text-blue-600 font-bold">แข่ง</span>' : '<span class="text-red-600">ปิด</span>';
+        tr.innerHTML = `<td class="border px-3 py-2">${d.date}</td><td class="border px-3 py-2">${d.startTime}</td><td class="border px-3 py-2">${d.endTime}</td><td class="border px-3 py-2">${d.courses.join(',')}</td><td class="border px-3 py-2 text-center">${typeText}</td><td class="border px-3 py-2">${d.note || '-'}</td><td class="border px-3 py-2"><button class="text-red-600 underline delClosed" data-id="${doc.id}">ยกเลิก</button></td>`; closedCoursesTableBody.appendChild(tr); }); });
+    }
+    if (closedCoursesTableBody) {
+        closedCoursesTableBody.onclick = async (e) => { if (e.target.classList.contains('delClosed')) { if (confirm('ยกเลิกการปิด?')) await db.collection('closed_courses').doc(e.target.dataset.id).delete(); } }
+    }
+    
+    // [MODIFIED] Close Course Modal - Add Tournament Checkbox
+    closeCourseBtn.onclick = async () => {
+        const modal = document.createElement('div'); modal.innerHTML = `<div style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.5);display:flex;justify-content:center;align-items:center;z-index:9999;"><div style="background:white;padding:2rem;border-radius:10px;width:350px;">
+        <h3 class="font-bold text-lg mb-2">ปิดคอร์ส / ปิดแข่ง</h3>
+        <p class="text-xs text-red-600 mb-2">* การปิดคอร์สจะลบการจองที่มีอยู่ในช่วงเวลานั้น</p>
+        <input type="date" id="ccDate" value="${datePicker.value}" class="border p-1 mb-2 block w-full">
+        <div class="flex gap-2 mb-2"><label><input type="checkbox" class="ccBox" value="A">A</label><label><input type="checkbox" class="ccBox" value="B">B</label><label><input type="checkbox" class="ccBox" value="C">C</label><label><input type="checkbox" class="ccBox" value="D">D</label></div>
+        <div class="mb-2 bg-blue-50 p-2 rounded border border-blue-200">
+            <label class="flex items-center gap-2 cursor-pointer select-none">
+                <input type="checkbox" id="ccTournament" class="w-4 h-4">
+                <span class="font-bold text-blue-800">🏆 ปิดแข่ง (Tournament)</span>
+            </label>
+        </div>
+        <select id="ccStart" class="border p-1 mb-2 w-full">${timeInput.innerHTML}</select>
+        <select id="ccEnd" class="border p-1 mb-2 w-full">${timeInput.innerHTML}</select>
+        <input type="text" id="ccNote" placeholder="หมายเหตุ (เช่น ชื่อรายการแข่ง)" class="border p-1 mb-2 w-full">
+        <div class="flex justify-end gap-2"><button id="ccCancel" class="bg-gray-300 px-3 py-1 rounded">ยกเลิก</button><button id="ccSave" class="bg-red-600 text-white px-3 py-1 rounded">บันทึก</button></div></div></div>`;
+        document.body.appendChild(modal); modal.querySelector('#ccCancel').onclick = () => document.body.removeChild(modal);
+        modal.querySelector('#ccSave').onclick = async () => { 
+            const courses = Array.from(modal.querySelectorAll('.ccBox:checked')).map(c => c.value); 
+            const date = modal.querySelector('#ccDate').value; 
+            const startTime = modal.querySelector('#ccStart').value; 
+            const endTime = modal.querySelector('#ccEnd').value; 
+            const note = modal.querySelector('#ccNote').value; 
+            const isTournament = modal.querySelector('#ccTournament').checked; // Get Tournament Status
+
+            if (courses.length && date) { 
+                const actionType = isTournament ? 'ปิดแข่ง' : 'ปิดคอร์ส';
+                if(!confirm(`ยืนยันการ${actionType} ${courses.join(',')} เวลา ${startTime}-${endTime}?\n** การจองที่มีอยู่จะถูกลบ **`)) return;
+
+                // 1. Delete conflict bookings
+                const allSlots = generateTimeSlots();
+                const sIdx = allSlots.indexOf(startTime);
+                const eIdx = allSlots.indexOf(endTime);
+                
+                try {
+                    const qSnapshot = await db.collection('tee_bookings').where('date', '==', date).get();
+                    const batch = db.batch();
+                    let deletedCount = 0;
+
+                    qSnapshot.forEach(doc => {
+                        const b = doc.data();
+                        const bTimeIdx = allSlots.indexOf(b.time);
+                        if (bTimeIdx >= sIdx && bTimeIdx <= eIdx) {
+                            if (b.course && b.course.some(c => courses.includes(c))) {
+                                batch.delete(doc.ref);
+                                deletedCount++;
+                            }
+                        }
+                    });
+
+                    // 2. Add Closed Course Record
+                    const ccRef = db.collection('closed_courses').doc();
+                    batch.set(ccRef, {date, startTime, endTime, courses, note, isTournament});
+                    
+                    await batch.commit();
+                    logActivity(`${actionType} (Overwrite)`, { date, courses, startTime, endTime, deletedBookings: deletedCount, note, isTournament });
+                    document.body.removeChild(modal); 
+                } catch(e) {
+                    alert("Error: " + e.message);
+                }
+            } 
+        };
+    }
+
+    function updateCourseCheckboxesForTime(time, container, editId) {
+        const closed = closedCourseSlots.find(s => s.time === time); const disableSet = new Set(closed ? closed.courses : []); const bookings = allBookingsForSearch[time] || [];
+        bookings.forEach(b => { if (editId !== b.id) b.course?.forEach(c => disableSet.add(c)); });
+        container.querySelectorAll('input').forEach(cb => { cb.disabled = disableSet.has(cb.value); if (cb.disabled) { cb.checked = false; cb.parentElement.style.textDecoration = 'line-through'; cb.parentElement.classList.add('text-gray-400'); } else { cb.parentElement.style.textDecoration = 'none'; cb.parentElement.classList.remove('text-gray-400'); } });
+    }
+
+    // --- Auth (unchanged) ---
+    const STAFF_ACCOUNTS = { 'a': '1234', 'was': '20230' , 'wi': '20230', 'wan': '20230', 'porn': '20230'};
+    let currentStaff = null;
+    const loginModal = document.getElementById('loginModal');
+    const loginForm = document.getElementById('loginForm');
+    const guestBtn = document.getElementById('guestBtn');
+    const loginError = document.getElementById('loginError');
+    const appContainer = document.getElementById('appContainer');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const saveBookingBtn = bookingForm.querySelector('button[type="submit"]');
+
+    logoutBtn.onclick = () => { sessionStorage.removeItem('loggedInStaff'); location.reload(); };
+    loginForm.onsubmit = (e) => {
+      e.preventDefault(); const name = document.getElementById('loginName').value.trim(); const pass = document.getElementById('loginPass').value;
+      if (STAFF_ACCOUNTS[name] && STAFF_ACCOUNTS[name] === pass) { currentStaff = name; sessionStorage.setItem('loggedInStaff', name); loginModal.classList.add('hidden'); setUIMode('staff'); } else loginError.classList.remove('hidden');
+    };
+    guestBtn.onclick = () => { currentStaff = null; loginModal.classList.add('hidden'); setUIMode('guest'); };
+
+    function setUIMode(mode) {
+      const isStaff = (mode === 'staff'); 
+      exportExcelBtn.style.display = isStaff ? 'block' : 'none'; 
+      printBtn.style.display = isStaff ? 'block' : 'none'; // NEW: Toggle Print Button
+      closeCourseBtn.style.display = isStaff ? 'block' : 'none'; 
+      openBookingBtn.style.display = isStaff ? 'block' : 'none'; 
+      openGroupBookingBtn.style.display = isStaff ? 'block' : 'none'; 
+      logBtn.style.display = isStaff ? 'block' : 'none'; 
+      logoutBtn.style.display = isStaff ? 'block' : 'none'; 
+      saveBookingBtn.style.display = isStaff ? 'block' : 'none'; 
+      
+      document.querySelectorAll('.manage-col').forEach(el => el.style.display = isStaff ? 'table-cell' : 'none'); 
+      document.querySelectorAll('.staff-only-col').forEach(el => el.style.display = isStaff ? 'table-cell' : 'none');
+      document.querySelectorAll('.staff-only-section').forEach(el => el.style.display = isStaff ? 'flex' : 'none'); // Use flex for staff-only section
+
+      appContainer.style.display = 'block'; 
+      loadBookings(); 
+      loadClosedCoursesForDate(datePicker.value); 
+      loadCaddyLeaves(); 
+      setActiveNav(mainPageBtn); 
+      updateLayoutByDate(datePicker.value);
+    }
+
+    // --- Menu Switch Logic (unchanged) ---
+    function setActiveNav(activeBtn) {
+      document.querySelectorAll('.navBtn').forEach(btn => {
+        btn.classList.remove('bg-blue-700', 'bg-purple-700', 'bg-orange-700', 'bg-red-700'); 
+        if (btn.id === 'mainPageBtn') btn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+        if (btn.id === 'summaryPageBtn') btn.classList.add('bg-purple-600', 'hover:bg-purple-700');
+        if (btn.id === 'closedCoursesPageBtn') btn.classList.add('bg-orange-500', 'hover:bg-orange-600');
+        if (btn.id === 'caddyLeavePageBtn') btn.classList.add('bg-red-500', 'hover:bg-red-600');
+      });
+      if (activeBtn === mainPageBtn) {
+        activeBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+        activeBtn.classList.add('bg-blue-700'); 
+      } else if (activeBtn === summaryPageBtn) {
+        activeBtn.classList.remove('bg-purple-600', 'hover:bg-purple-700');
+        activeBtn.classList.add('bg-purple-700'); 
+      } else if (activeBtn === closedCoursesPageBtn) {
+        activeBtn.classList.remove('bg-orange-500', 'hover:bg-orange-600');
+        activeBtn.classList.add('bg-orange-700'); 
+      } else if (activeBtn === caddyLeavePageBtn) {
+        activeBtn.classList.remove('bg-red-500', 'hover:bg-red-600');
+        activeBtn.classList.add('bg-red-700'); 
+      }
+    }
+
+    mainPageBtn.onclick = () => {
+      mainSection.classList.remove('hidden');
+      summarySection.classList.add('hidden');
+      closedCoursesSection.classList.add('hidden'); 
+      caddyLeaveSection.classList.add('hidden');
+      setActiveNav(mainPageBtn);
+      updateLayoutByDate(datePicker.value); 
+    };
+    summaryPageBtn.onclick = () => {
+      mainSection.classList.add('hidden');
+      summarySection.classList.remove('hidden');
+      closedCoursesSection.classList.add('hidden'); 
+      caddyLeaveSection.classList.add('hidden');
+      setActiveNav(summaryPageBtn);
+      loadSummaryBookings();
+    };
+    closedCoursesPageBtn.onclick = () => {
+      mainSection.classList.add('hidden');
+      summarySection.classList.add('hidden');
+      closedCoursesSection.classList.remove('hidden'); 
+      caddyLeaveSection.classList.add('hidden');
+      setActiveNav(closedCoursesPageBtn);
+      loadClosedCourses(); 
+    };
+    viewClosedCoursesBtn.onclick = closedCoursesPageBtn.onclick;
+    
+    caddyLeavePageBtn.onclick = () => {
+      mainSection.classList.add('hidden');
+      summarySection.classList.add('hidden');
+      closedCoursesSection.classList.add('hidden'); 
+      caddyLeaveSection.classList.remove('hidden');
+      setActiveNav(caddyLeavePageBtn);
+      loadCaddyLeaves();
+    };
+
+    const loggedInStaff = sessionStorage.getItem('loggedInStaff'); if (loggedInStaff && STAFF_ACCOUNTS[loggedInStaff]) { currentStaff = loggedInStaff; loginModal.classList.add('hidden'); setUIMode('staff'); } else { loginModal.classList.remove('hidden'); appContainer.style.display = 'none'; }
+    
+  </script>
+  <div class="text-center text-xs text-gray-400 mt-8">Powered by Firebase Firestore | เปิดดูได้ทุกที่</div>
+</body>
+</html>
